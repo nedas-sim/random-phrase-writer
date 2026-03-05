@@ -7,9 +7,8 @@
   body { font-family: monospace; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #111; color: #ddd; }
   h1 { font-size: 1.2em; color: #fff; margin-bottom: 24px; }
   h2 { font-size: 0.9em; color: #888; text-transform: uppercase; letter-spacing: 0.1em; margin: 32px 0 8px; }
-  input[type=file] { display: none; }
-  label.pick { display: inline-block; padding: 8px 16px; background: #222; border: 1px solid #444; cursor: pointer; color: #ccc; }
-  label.pick:hover { border-color: #888; }
+  button { padding: 8px 16px; background: #222; border: 1px solid #444; cursor: pointer; color: #ccc; font-family: monospace; }
+  button:hover { border-color: #888; }
   table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
   th { text-align: left; color: #666; padding: 4px 8px; border-bottom: 1px solid #222; }
   td { padding: 4px 8px; border-bottom: 1px solid #1a1a1a; }
@@ -17,14 +16,14 @@
   .bar { display: inline-block; height: 8px; background: #444; vertical-align: middle; margin-left: 8px; }
   #stats { display: none; }
   .total { font-size: 2em; color: #fff; }
+  #status { display: inline-block; margin-left: 12px; color: #555; font-size: 0.8em; }
 </style>
 </head>
 <body>
 
 <h1>Phrase Stats</h1>
-<label class="pick" id="pickLabel">Load phrases.db
-  <input type="file" id="dbFile" accept=".db">
-</label>
+<button id="pickBtn">Load phrases.db</button>
+<span id="status"></span>
 
 <div id="stats">
   <h2>Total picks</h2>
@@ -48,19 +47,27 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 <script>
-  document.getElementById('dbFile').addEventListener('change', async e => {
-    const file = e.target.files[0];
-    if (!file) return;
+  let SQL, fileHandle, lastModified = 0;
 
-    const SQL = await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}` });
-    const buf = await file.arrayBuffer();
-    const db = new SQL.Database(new Uint8Array(buf));
+  document.getElementById('pickBtn').addEventListener('click', async () => {
+    [fileHandle] = await window.showOpenFilePicker({ types: [{ accept: { 'application/x-sqlite3': ['.db'] } }] });
+    SQL = SQL ?? await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}` });
+    lastModified = 0; // force render on first load
+    await refresh();
+    setInterval(refresh, 2000);
+    document.getElementById('pickBtn').textContent = fileHandle.name + ' ✓';
+  });
 
+  async function refresh() {
+    const file = await fileHandle.getFile();
+    if (file.lastModified === lastModified) return;
+    lastModified = file.lastModified;
+
+    const db = new SQL.Database(new Uint8Array(await file.arrayBuffer()));
     const q = sql => db.exec(sql)[0];
 
     // Total
-    const total = q("SELECT COUNT(*) FROM picks").values[0][0];
-    document.getElementById('total').textContent = total;
+    document.getElementById('total').textContent = q("SELECT COUNT(*) FROM picks").values[0][0];
 
     // Word frequency
     const wordRows = q(`
@@ -73,6 +80,7 @@
     `).values;
     const maxWord = wordRows[0][1];
     const wordTable = document.getElementById('wordTable');
+    wordTable.innerHTML = '<tr><th>Word</th><th>Picks</th><th></th></tr>';
     for (const [text, n] of wordRows) {
       const pct = Math.round((n / maxWord) * 120);
       wordTable.innerHTML += `<tr><td>${text}</td><td class="num">${n}</td><td><span class="bar" style="width:${pct}px"></span></td></tr>`;
@@ -88,6 +96,7 @@
       ORDER BY n DESC LIMIT 10
     `).values;
     const pairTable = document.getElementById('pairTable');
+    pairTable.innerHTML = '<tr><th>Pair</th><th>Times</th></tr>';
     for (const [w1, w2, n] of pairRows)
       pairTable.innerHTML += `<tr><td>${w1} ${w2}</td><td class="num">${n}</td></tr>`;
 
@@ -100,14 +109,14 @@
       ORDER BY p.picked_at DESC LIMIT 20
     `).values;
     const recentTable = document.getElementById('recentTable');
-    for (const [ts, w1, w2] of recentRows) {
-      const when = new Date(ts).toLocaleString();
-      recentTable.innerHTML += `<tr><td>${when}</td><td>${w1} ${w2}</td></tr>`;
-    }
+    recentTable.innerHTML = '<tr><th>When</th><th>Phrase</th></tr>';
+    for (const [ts, w1, w2] of recentRows)
+      recentTable.innerHTML += `<tr><td>${new Date(ts).toLocaleString()}</td><td>${w1} ${w2}</td></tr>`;
 
+    db.close();
     document.getElementById('stats').style.display = 'block';
-    document.getElementById('pickLabel').textContent = file.name + ' ✓';
-  });
+    document.getElementById('status').textContent = 'updated ' + new Date().toLocaleTimeString();
+  }
 </script>
 </body>
 </html>
