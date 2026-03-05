@@ -1,1 +1,2 @@
-powershell -ExecutionPolicy Bypass -File "C:\projects\random-phrase-writer\random-phrase-writer.ps1"
+cd /d "C:\projects\random-phrase-writer"
+dotnet run "C:\projects\random-phrase-writer\random-phrase-writer.cs"
