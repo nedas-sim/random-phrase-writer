@@ -1,0 +1,1 @@
+powershell -ExecutionPolicy Bypass -File "C:\projects\random-phrase-writer\random-phrase-writer.ps1"
