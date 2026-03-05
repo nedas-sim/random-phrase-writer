@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Phrase Stats</title>
+<style>
+  body { font-family: monospace; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #111; color: #ddd; }
+  h1 { font-size: 1.2em; color: #fff; margin-bottom: 24px; }
+  h2 { font-size: 0.9em; color: #888; text-transform: uppercase; letter-spacing: 0.1em; margin: 32px 0 8px; }
+  input[type=file] { display: none; }
+  label.pick { display: inline-block; padding: 8px 16px; background: #222; border: 1px solid #444; cursor: pointer; color: #ccc; }
+  label.pick:hover { border-color: #888; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+  th { text-align: left; color: #666; padding: 4px 8px; border-bottom: 1px solid #222; }
+  td { padding: 4px 8px; border-bottom: 1px solid #1a1a1a; }
+  td.num { text-align: right; color: #aaa; }
+  .bar { display: inline-block; height: 8px; background: #444; vertical-align: middle; margin-left: 8px; }
+  #stats { display: none; }
+  .total { font-size: 2em; color: #fff; }
+</style>
+</head>
+<body>
+
+<h1>Phrase Stats</h1>
+<label class="pick" id="pickLabel">Load phrases.db
+  <input type="file" id="dbFile" accept=".db">
+</label>
+
+<div id="stats">
+  <h2>Total picks</h2>
+  <div class="total" id="total"></div>
+
+  <h2>Word frequency</h2>
+  <table id="wordTable">
+    <tr><th>Word</th><th>Picks</th><th></th></tr>
+  </table>
+
+  <h2>Top pairs</h2>
+  <table id="pairTable">
+    <tr><th>Pair</th><th>Times</th></tr>
+  </table>
+
+  <h2>Recent picks</h2>
+  <table id="recentTable">
+    <tr><th>When</th><th>Phrase</th></tr>
+  </table>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script>
+  document.getElementById('dbFile').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const SQL = await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}` });
+    const buf = await file.arrayBuffer();
+    const db = new SQL.Database(new Uint8Array(buf));
+
+    const q = sql => db.exec(sql)[0];
+
+    // Total
+    const total = q("SELECT COUNT(*) FROM picks").values[0][0];
+    document.getElementById('total').textContent = total;
+
+    // Word frequency
+    const wordRows = q(`
+      SELECT w.text, COUNT(*) as n FROM (
+        SELECT word1_id AS wid FROM picks
+        UNION ALL
+        SELECT word2_id FROM picks
+      ) x JOIN words w ON w.id = x.wid
+      GROUP BY w.id ORDER BY n DESC
+    `).values;
+    const maxWord = wordRows[0][1];
+    const wordTable = document.getElementById('wordTable');
+    for (const [text, n] of wordRows) {
+      const pct = Math.round((n / maxWord) * 120);
+      wordTable.innerHTML += `<tr><td>${text}</td><td class="num">${n}</td><td><span class="bar" style="width:${pct}px"></span></td></tr>`;
+    }
+
+    // Top pairs
+    const pairRows = q(`
+      SELECT w1.text, w2.text, COUNT(*) as n
+      FROM picks p
+      JOIN words w1 ON w1.id = p.word1_id
+      JOIN words w2 ON w2.id = p.word2_id
+      GROUP BY p.word1_id, p.word2_id
+      ORDER BY n DESC LIMIT 10
+    `).values;
+    const pairTable = document.getElementById('pairTable');
+    for (const [w1, w2, n] of pairRows)
+      pairTable.innerHTML += `<tr><td>${w1} ${w2}</td><td class="num">${n}</td></tr>`;
+
+    // Recent
+    const recentRows = q(`
+      SELECT p.picked_at, w1.text, w2.text
+      FROM picks p
+      JOIN words w1 ON w1.id = p.word1_id
+      JOIN words w2 ON w2.id = p.word2_id
+      ORDER BY p.picked_at DESC LIMIT 20
+    `).values;
+    const recentTable = document.getElementById('recentTable');
+    for (const [ts, w1, w2] of recentRows) {
+      const when = new Date(ts).toLocaleString();
+      recentTable.innerHTML += `<tr><td>${when}</td><td>${w1} ${w2}</td></tr>`;
+    }
+
+    document.getElementById('stats').style.display = 'block';
+    document.getElementById('pickLabel').textContent = file.name + ' ✓';
+  });
+</script>
+</body>
+</html>
