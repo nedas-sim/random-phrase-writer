@@ -47,15 +47,54 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 <script>
+(async () => {
   let SQL, fileHandle, lastModified = 0;
 
-  document.getElementById('pickBtn').addEventListener('click', async () => {
-    [fileHandle] = await window.showOpenFilePicker({ types: [{ accept: { 'application/x-sqlite3': ['.db'] } }] });
+  // IndexedDB helpers to persist the file handle across page loads
+  const db_idb = await new Promise((res, rej) => {
+    const r = indexedDB.open('phrase-stats', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('handles');
+    r.onsuccess = () => res(r.result);
+    r.onerror = rej;
+  });
+
+  function idbGet(key) {
+    return new Promise((res, rej) => {
+      const tx = db_idb.transaction('handles', 'readonly').objectStore('handles').get(key);
+      tx.onsuccess = () => res(tx.result);
+      tx.onerror = rej;
+    });
+  }
+
+  function idbSet(key, val) {
+    return new Promise((res, rej) => {
+      const tx = db_idb.transaction('handles', 'readwrite').objectStore('handles').put(val, key);
+      tx.onsuccess = res;
+      tx.onerror = rej;
+    });
+  }
+
+  async function startPolling(handle) {
+    fileHandle = handle;
     SQL = SQL ?? await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}` });
-    lastModified = 0; // force render on first load
+    lastModified = 0;
     await refresh();
     setInterval(refresh, 2000);
     document.getElementById('pickBtn').textContent = fileHandle.name + ' ✓';
+  }
+
+  // On load: restore handle and auto-resume if permission is still granted
+  const saved = await idbGet('fileHandle');
+  if (saved && (await saved.queryPermission({ mode: 'read' })) === 'granted')
+    startPolling(saved);
+
+  document.getElementById('pickBtn').addEventListener('click', async () => {
+    const opts = { types: [{ accept: { 'application/x-sqlite3': ['.db'] } }] };
+    if (fileHandle) opts.startIn = fileHandle;
+    else if (saved) opts.startIn = saved;
+    [fileHandle] = await window.showOpenFilePicker(opts);
+    await idbSet('fileHandle', fileHandle);
+    await startPolling(fileHandle);
   });
 
   async function refresh() {
@@ -117,6 +156,7 @@
     document.getElementById('stats').style.display = 'block';
     document.getElementById('status').textContent = 'updated ' + new Date().toLocaleTimeString();
   }
+})();
 </script>
 </body>
 </html>
